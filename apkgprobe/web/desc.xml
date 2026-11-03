@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config>
+  <en-US>Test app that logs every lifecycle script the OS5 app manager runs. Safe to install and remove.</en-US>
+  <ru-RU>Тестовое приложение: записывает в журнал каждый вызов скриптов менеджера приложений OS5. Безопасно устанавливать и удалять.</ru-RU>
+</config>

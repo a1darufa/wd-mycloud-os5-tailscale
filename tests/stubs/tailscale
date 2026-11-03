@@ -1,0 +1,157 @@
+#!/bin/sh
+# Stub tailscale CLI: answers from the status file the stub tailscaled writes
+# at its --socket path. Supports only what the app uses. Files next to the
+# socket stand in for the daemon's other state:
+#   <socket>.prefs      prefs, as "tailscale debug prefs" prints them
+#   <socket>.auth-url   the login link of an interactive login
+#   <socket>.logged-in  a login succeeded (the stub daemon then runs)
+#   <socket>.key-source where the last login read its key from (not the key)
+#   <socket>.logged-out logged out, or a login's new profile not in yet
+#   <socket>.down       "tailscale down"
+#   <socket>.up-args, <socket>.switch-args  the arguments of the last up, switch
+# An auth key is accepted if it ends in "good". Like the real one, "login"
+# first leaves the current profile, so a refused key leaves the node logged
+# out until "switch" returns to the old one.
+
+socket=/var/run/tailscale/tailscaled.sock
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --socket=*)
+            socket=${1#--socket=}
+            shift
+            ;;
+        *) break ;;
+    esac
+done
+
+if [ ! -f "$socket" ]; then
+    echo "stub tailscale: failed to connect to $socket" >&2
+    exit 1
+fi
+
+# Prefs as JSON, with a stand-in secret that must never reach a browser.
+write_prefs() { # <hostname> <routes JSON or null> <auto-update apply>
+    cat > "$socket.prefs" << EOF
+{
+	"ControlURL": "https://controlplane.example",
+	"Hostname": "$1",
+	"AdvertiseRoutes": $2,
+	"AutoUpdate": {
+		"Check": true,
+		"Apply": $3
+	},
+	"Config": {
+		"PrivateNodeKey": "privkey:stub-secret"
+	}
+}
+EOF
+}
+[ -f "$socket.prefs" ] || write_prefs "" null true
+
+# "tailscale set" with the flags the app passes.
+set_prefs() {
+    hostname="" routes="" exit_node=false auto_update=true
+    for arg in "$@"; do
+        case "$arg" in
+            --hostname=*) hostname=${arg#*=} ;;
+            --advertise-routes=*) routes=${arg#*=} ;;
+            --advertise-exit-node=*) exit_node=${arg#*=} ;;
+            --auto-update=*) auto_update=${arg#*=} ;;
+            *)
+                echo "stub tailscale: unsupported flag for set: $arg" >&2
+                exit 2
+                ;;
+        esac
+    done
+    [ "$exit_node" = true ] && routes="${routes:+$routes,}0.0.0.0/0,::/0"
+    if [ -n "$routes" ]; then
+        routes_json="[\"$(echo "$routes" | sed 's/,/", "/g')\"]"
+    else
+        routes_json=null
+    fi
+    write_prefs "$hostname" "$routes_json" "$auto_update"
+    echo "$*" > "$socket.set-args"
+}
+
+login() {
+    key_file=""
+    for arg in "$@"; do
+        case "$arg" in
+            --auth-key=file:*) key_file=${arg#--auth-key=file:} ;;
+            --auth-key=*)
+                echo "stub tailscale: the key must come from a file" >&2
+                exit 2
+                ;;
+        esac
+    done
+    # A new, empty profile: whatever the node was logged in to, it isn't now.
+    rm -f "$socket.logged-in" "$socket.down"
+    touch "$socket.logged-out"
+    if [ -z "$key_file" ]; then
+        echo "https://login.example/a/stub" > "$socket.auth-url"
+        echo "To authenticate, visit: https://login.example/a/stub"
+        return 0
+    fi
+    key=$(cat "$key_file")
+    echo "$key_file" > "$socket.key-source"
+    case "$key" in
+        *good)
+            rm -f "$socket.auth-url" "$socket.logged-out"
+            touch "$socket.logged-in"
+            sleep 2 # the stub daemon reports Running within a second
+            ;;
+        *)
+            echo "backend error: invalid key: unable to validate API key" >&2
+            exit 1
+            ;;
+    esac
+}
+
+case "$1" in
+    status)
+        cat "$socket"
+        ;;
+    ip)
+        grep -q '"BackendState": "Running"' "$socket" || exit 1
+        echo 100.101.102.103
+        ;;
+    version)
+        echo stub
+        ;;
+    debug)
+        [ "${2:-}" = prefs ] || exit 2
+        cat "$socket.prefs"
+        ;;
+    set)
+        shift
+        set_prefs "$@"
+        ;;
+    login)
+        shift
+        login "$@"
+        ;;
+    down)
+        touch "$socket.down"
+        ;;
+    up)
+        shift
+        echo "$*" > "$socket.up-args"
+        rm -f "$socket.down"
+        sleep 1 # the stub daemon reports Running within a second
+        ;;
+    logout)
+        rm -f "$socket.logged-in" "$socket.down" "$socket.auth-url"
+        touch "$socket.logged-out"
+        ;;
+    switch)
+        shift
+        echo "$*" > "$socket.switch-args"
+        rm -f "$socket.logged-out" "$socket.auth-url"
+        touch "$socket.logged-in"
+        sleep 1
+        ;;
+    *)
+        echo "stub tailscale: unsupported command: $*" >&2
+        exit 2
+        ;;
+esac

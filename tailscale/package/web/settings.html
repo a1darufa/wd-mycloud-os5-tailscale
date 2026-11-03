@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tailscale settings</title>
+<link rel="stylesheet" href="settings.css">
+<script src="settings-common.js" defer></script>
+<script src="settings.js" defer></script>
+</head>
+<body>
+<main id="page" hidden>
+  <div class="title">
+    <h1>Tailscale</h1>
+    <span id="state" class="badge">Checking...</span>
+  </div>
+  <p id="banner" class="banner" hidden></p>
+
+  <section id="node" class="card" hidden>
+    <h2>This NAS on your tailnet</h2>
+    <dl class="facts">
+      <dt>Name</dt><dd id="node-name"></dd>
+      <dt>Addresses</dt><dd id="node-ips"></dd>
+      <dt>Tailnet</dt><dd id="node-tailnet"></dd>
+      <dt>Version</dt><dd id="node-version"></dd>
+    </dl>
+    <ul id="health" class="hint"></ul>
+  </section>
+
+  <section id="login" class="card" hidden>
+    <h2 id="login-title">Join your tailnet</h2>
+    <p id="login-intro">Log this NAS in once, in either of two ways.</p>
+    <p id="switch-intro" hidden>Log in to the other tailnet below. The NAS joins it as a new device
+      with its own address, and leaves the current tailnet at once. The current tailnet's login stays
+      on the NAS, so you can come back to it.</p>
+    <p id="switch-key-only" class="banner warn" hidden>You opened this page through Tailscale, so only
+      an auth key works here: with a login link, the NAS would be off every tailnet until you opened
+      the link, and this page couldn't show it to you.</p>
+    <div class="actions" id="switch-back-row" hidden>
+      <button id="switch-back" type="button" class="secondary">Go back</button>
+      <span id="switch-back-status" class="status" role="status"></span>
+    </div>
+
+    <div id="login-account">
+      <h3>With your Tailscale account</h3>
+      <div class="actions">
+        <button id="login-start" type="button">Get a login link</button>
+        <a id="login-link" class="button secondary" href="#" target="_blank" rel="noopener noreferrer" hidden>Open Tailscale's login page</a>
+        <span id="login-status" class="status" role="status"></span>
+      </div>
+    </div>
+
+    <h3>With an auth key</h3>
+    <form id="key-form" novalidate>
+      <label for="auth-key">Auth key</label>
+      <input id="auth-key" name="auth_key" type="password" autocomplete="off" spellcheck="false" maxlength="512">
+      <span class="hint">Create one in the Tailscale admin console under Settings, Keys. It's used once
+        to log in and isn't kept on the NAS.</span>
+      <span class="error-text" data-error-for="auth_key"></span>
+      <div class="actions">
+        <button id="key-submit" type="submit">Join with this key</button>
+        <button id="switch-cancel" type="button" class="secondary" hidden>Cancel</button>
+        <span id="key-status" class="status" role="status"></span>
+      </div>
+    </form>
+  </section>
+
+  <form id="settings" class="card" novalidate hidden>
+    <h2>Settings</h2>
+
+    <label for="hostname">Name on the tailnet</label>
+    <input id="hostname" name="hostname" type="text" maxlength="63" spellcheck="false">
+    <span class="hint">Leave empty to use the NAS's own name. Other devices find the NAS under this
+      name; its tailnet addresses stay the same.</span>
+    <span class="error-text" data-error-for="hostname"></span>
+
+    <label for="routes">Subnet routes to offer</label>
+    <textarea id="routes" name="routes" rows="3" spellcheck="false" placeholder="192.168.1.0/24"></textarea>
+    <span class="hint">One range per line, such as your home network, so devices on your tailnet can
+      reach other devices there through this NAS. Approve the routes in the admin console as well.</span>
+    <span class="error-text" data-error-for="routes"></span>
+
+    <label class="check"><input id="exit-node" name="exit_node" type="checkbox"> Offer this NAS as an exit node</label>
+    <span class="hint">Devices on your tailnet can then send their internet traffic (IPv4) through the
+      NAS's connection. Approve it in the admin console as well.</span>
+
+    <label class="check"><input id="auto-update" name="auto_update" type="checkbox"> Update Tailscale automatically</label>
+    <span class="hint">Tailscale replaces its own program when a new version comes out.</span>
+
+    <div class="actions">
+      <button id="save" type="submit">Save</button>
+      <span id="save-status" class="status" role="status"></span>
+    </div>
+    <span class="hint">Changes apply at once, without a restart. Routes and the exit node turn on IP
+      forwarding on the NAS, and off again when you remove them. An IPv6 route also turns on IPv6
+      forwarding, which stops the NAS from taking its own IPv6 address from your router.</span>
+  </form>
+
+  <section id="leave" class="card caution" hidden>
+    <h2>Disconnect, log out or switch tailnet</h2>
+    <p id="via-tailscale" class="banner warn" hidden>You opened this page through Tailscale. Each of
+      these cuts that connection at once, and this page stops answering.</p>
+    <p>Think twice if the NAS is far away: Tailscale may be the only way to reach it.</p>
+    <label class="check"><input id="leave-ok" type="checkbox"> I can reach this NAS without Tailscale,
+      for example on its local network.</label>
+    <div class="actions">
+      <button id="disconnect" type="button" class="caution" disabled>Disconnect</button>
+      <button id="connect" type="button" hidden>Connect</button>
+      <button id="logout" type="button" class="caution" disabled>Log out</button>
+      <button id="switch" type="button" class="caution" disabled>Connect to another tailnet</button>
+      <span id="leave-status" class="status" role="status"></span>
+    </div>
+    <ul class="hint">
+      <li><strong>Disconnect</strong> takes the NAS offline but keeps it logged in; Connect brings it back.</li>
+      <li><strong>Log out</strong> leaves this tailnet. Logging in again makes the NAS a new device with
+        a new address.</li>
+      <li><strong>Connect to another tailnet</strong> logs in to a different account or tailnet. This
+        tailnet's login stays on the NAS, and you can come back to it.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Not on this page, on purpose</h2>
+    <p>Tailscale SSH, and using other devices' routes or exit nodes, can each cut this NAS off your
+      tailnet in ways that are hard to undo from here. If you need them, use the <code>tailscale</code>
+      command over SSH. Switching Run App OFF, or uninstalling the app, also disconnects the NAS.</p>
+  </section>
+
+  <section class="card">
+    <h2>Where things are</h2>
+    <ul>
+      <li>Identity and settings: <code>/mnt/HD/HD_a2/.systemfile/tailscale/state</code> (kept on uninstall)</li>
+      <li>Logs: <code>/mnt/HD/HD_a2/.systemfile/tailscale/log</code></li>
+      <li>Command line, over SSH: <code>/mnt/HD/HD_a2/Nas_Prog/tailscale/bin/tailscale</code></li>
+    </ul>
+    <p class="hint">After installing a new version, the dashboard may hang on "Updating"; refresh it.
+      Tailscale keeps running throughout, and puts Run App back the way it was. If the dashboard still
+      shows OFF, switch it ON yourself.</p>
+  </section>
+</main>
+</body>
+</html>

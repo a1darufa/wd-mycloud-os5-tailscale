@@ -1,0 +1,20 @@
+# Build output
+/dist/
+/build/
+
+# Downloaded upstream payloads (re-fetched and hash-checked by the build)
+/downloads/
+
+# Never commit device secrets or backups taken from the NAS
+/backup/
+*.state
+
+# Data copied from the NAS: the survey (IPs, tailnet IDs), probe logs and WD's
+# own app files, plus private icons the builds use when present. Kept on disk
+# for reference, never in history, so the repo can be pushed anywhere without
+# leaking it.
+/reference/
+
+# The public repositories tools/export-public.sh writes, when kept inside this one
+/public/
+/public-*/

@@ -1,0 +1,20 @@
+Package:	apkgprobe
+Section:	Apps
+Version:	0.1.3
+Packager:	a1dar
+Email:
+Homepage:
+Description:	Test app that logs every lifecycle script the OS5 app manager runs. It only writes its own folder, its dashboard page and its log in .systemfile/apkgprobe.
+Icon:	apkgprobe.png
+AddonShowName:	APKG Probe
+AddonIndexPage:	index.html
+AddonUsedPort:
+InstDepend:
+InstConflict:
+StartDepend:
+StartConflict:
+CenterType:	0
+UserControl:	1
+MinFWVer:
+MaxFWVer:
+IndividualFlag:

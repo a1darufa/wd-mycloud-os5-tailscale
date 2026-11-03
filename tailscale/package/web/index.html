@@ -1,0 +1,13 @@
+<!-- index.html — what the dashboard's Configure button shows. With
+     CenterType 1 the dashboard fetches this file and inserts it into its own
+     page, so the settings page sits in an iframe with its own styles and
+     scripts. Both are under /apps/, behind the dashboard login. -->
+<iframe src="/apps/tailscale/settings.html" title="Tailscale settings"
+        style="display: block; width: 100%; height: 600px; border: 0;"></iframe>
+<script>
+    // The dashboard calls page_load() after inserting a page and
+    // page_unload() before leaving it. Defining both keeps it from running
+    // the previous page's versions; this page needs neither.
+    function page_load() {}
+    function page_unload() {}
+</script>

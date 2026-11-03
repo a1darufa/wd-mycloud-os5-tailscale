@@ -1,0 +1,7 @@
+# Everything that runs on the NAS is executed by busybox sh, which breaks on
+# CRLF. Force LF for all text files regardless of the checkout platform.
+* text=auto eol=lf
+
+*.png binary
+*.bin binary
+*.tgz binary

@@ -1,0 +1,20 @@
+Package:	tailscale
+Section:	Apps
+Version:	1.104.4-4
+Packager:	a1dar
+Email:
+Homepage:	https://tailscale.com
+Description:	Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.
+Icon:	tailscale.png
+AddonShowName:	Tailscale
+AddonIndexPage:	index.html
+AddonUsedPort:
+InstDepend:
+InstConflict:
+StartDepend:
+StartConflict:
+CenterType:	1
+UserControl:	1
+MinFWVer:
+MaxFWVer:
+IndividualFlag:

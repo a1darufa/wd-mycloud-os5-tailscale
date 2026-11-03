@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config>
+  <en-US>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</en-US>
+  <ru-RU>Tailscale для этого NAS. Сохраняет идентичность узла при обновлениях и возвращается к прежнему демону, если новый не запускается. Вход и настройки — на странице настроек приложения. Выключение Run App отключает NAS от вашей сети Tailscale.</ru-RU>
+</config>

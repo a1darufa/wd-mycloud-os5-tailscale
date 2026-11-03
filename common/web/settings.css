@@ -1,0 +1,134 @@
+/* settings.css — shared by both apps' settings pages, which the dashboard
+   shows in an iframe (index.html). Each app's build.sh copies it into web/. */
+
+:root {
+    /* WD's dashboard is light only. This keeps the page's own canvas white
+       when it's opened on its own in a dark-mode browser. */
+    color-scheme: light;
+    --text: #26313b;
+    --muted: #5f6b77;
+    --line: #d3d9df;
+    --card: #ffffff;
+    --field: #ffffff;
+    --accent: #0a6cb2;
+    --accent-text: #ffffff;
+    --ok: #23733a;
+    --ok-bg: #e7f4ea;
+    --warn: #7a5200;
+    --warn-bg: #fff4dc;
+    --error: #b3261e;
+    --error-bg: #fdecea;
+    --code-bg: #eef1f4;
+}
+
+* { box-sizing: border-box; }
+
+/* The scripts show and hide parts with the hidden attribute; it must win over
+   display rules such as .button's. */
+[hidden] { display: none !important; }
+
+/* Transparent inside the dashboard's frame; opened on its own (the script
+   marks that with .standalone), the page brings its own background. */
+html, body { margin: 0; background: transparent; }
+html.standalone { background: #f4f6f8; }
+html.standalone body { padding: 16px; }
+
+body {
+    font: 14px/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: var(--text);
+    padding: 4px 2px 16px;
+}
+
+main { max-width: 680px; }
+
+.title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+h1 { font-size: 20px; font-weight: 600; margin: 0; }
+h2 { font-size: 15px; font-weight: 600; margin: 0 0 10px; }
+h3 { font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
+p { margin: 0 0 10px; }
+ul { margin: 0; padding-left: 20px; }
+li { margin: 2px 0; }
+a { color: var(--accent); }
+code { background: var(--code-bg); padding: 0 4px; border-radius: 3px; font-size: 13px; word-break: break-all; }
+
+.card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+}
+
+.badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--code-bg);
+    color: var(--muted);
+}
+.badge.ok { background: var(--ok-bg); color: var(--ok); }
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
+.badge.error { background: var(--error-bg); color: var(--error); }
+
+.banner { padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; border: 1px solid; }
+.banner.info { background: var(--code-bg); border-color: var(--line); }
+.banner.warn { background: var(--warn-bg); border-color: #e5c27a; color: var(--warn); }
+.banner.error { background: var(--error-bg); border-color: #f0b7b2; color: var(--error); }
+.banner.ok { background: var(--ok-bg); border-color: #a9d5b3; color: var(--ok); }
+
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; word-break: break-word; }
+
+label { display: block; font-weight: 600; margin-top: 12px; }
+label.check { display: flex; gap: 8px; align-items: baseline; font-weight: normal; }
+input[type="text"], input[type="password"], input:not([type]), textarea {
+    display: block;
+    width: 100%;
+    max-width: 420px;
+    margin-top: 4px;
+    padding: 6px 8px;
+    font: inherit;
+    font-weight: normal;
+    color: var(--text);
+    background: var(--field);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+}
+textarea { font-family: Menlo, Consolas, monospace; font-size: 13px; resize: vertical; }
+input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--error); }
+
+.hint { display: block; color: var(--muted); font-size: 13px; margin-top: 4px; max-width: 560px; }
+.error-text { display: block; color: var(--error); font-size: 13px; margin-top: 4px; }
+.error-text:empty { display: none; }
+
+.actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+button, .button {
+    display: inline-block;
+    padding: 7px 16px;
+    font: inherit;
+    font-weight: 600;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    background: var(--accent);
+    color: var(--accent-text);
+    cursor: pointer;
+    text-decoration: none;
+}
+button.secondary, .button.secondary { background: var(--card); color: var(--accent); }
+button.caution { background: var(--card); color: var(--error); border-color: var(--error); }
+.card.caution { border-color: #e7b3ae; }
+button:disabled { opacity: 0.55; cursor: default; }
+.status { color: var(--muted); }
+.status.ok { color: var(--ok); }
+.status.error { color: var(--error); }
+
+.or { color: var(--muted); margin: 14px 0 0; }
+
+@media (max-width: 480px) {
+    dl.facts { grid-template-columns: 1fr; }
+    dl.facts dd { margin-bottom: 6px; }
+}

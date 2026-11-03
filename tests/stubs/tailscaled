@@ -1,0 +1,117 @@
+#!/bin/sh
+# Stub tailscaled for tests and for the deliberate-failure build.
+#
+# It never touches the state folder: it only writes its status, as JSON, to
+# the --socket path (a plain file that the stub CLI reads). Its behaviour
+# comes from a "stub-mode" file next to it (default: running):
+#   running   Running after 1 s; bytes received from a peer keep growing
+#   quiet     Running after 1 s; no peer traffic
+#   starting  answers, but never reaches Running
+#   needs-login  answers as a new node that nobody has logged in yet, until
+#             the stub CLI's login creates <socket>.logged-in; with
+#             <socket>.node-key present, as a node whose login expired
+#   crash     exits at once
+#   hang      never answers
+# Files the stub CLI writes next to the socket change a connected node's
+# state: <socket>.logged-out (log out, or a switch waiting for its login)
+# makes it NeedsLogin, and <socket>.down ("tailscale down") Stopped.
+
+case "${1:-}" in
+    --version | -version)
+        echo "stub"
+        exit 0
+        ;;
+esac
+
+mode=$(cat "$(dirname "$0")/stub-mode" 2> /dev/null || echo running)
+socket=/var/run/tailscale/tailscaled.sock
+for arg in "$@"; do
+    case "$arg" in
+        --socket=*) socket=${arg#--socket=} ;;
+    esac
+done
+
+if [ "$mode" = crash ]; then
+    echo "stub tailscaled: crashing on purpose" >&2
+    exit 1
+fi
+
+shutdown() {
+    rm -f "$socket"
+    exit 0
+}
+trap shutdown TERM INT
+
+write_status() { # <state> <bytes received>
+    ips='"100.101.102.103"'
+    [ "$1" = Running ] || ips=""
+    have_node_key=false
+    if [ "$1" = Running ] || [ "$1" = Stopped ] || [ -f "$socket.node-key" ]; then
+        have_node_key=true
+    fi
+    hostname=$(sed -n 's/.*"Hostname": "\([^"]*\)".*/\1/p' "$socket.prefs" 2> /dev/null)
+    hostname=${hostname:-stub-nas}
+    cat > "$socket.tmp" << EOF
+{
+  "Version": "stub",
+  "BackendState": "$1",
+  "HaveNodeKey": $have_node_key,
+  "AuthURL": "$(cat "$socket.auth-url" 2> /dev/null)",
+  "TailscaleIPs": [$ips],
+  "Self": {
+    "HostName": "$hostname",
+    "DNSName": "$hostname.tailnet.example.",
+    "TailscaleIPs": [$ips]
+  },
+  "Health": [],
+  "CurrentTailnet": {
+    "Name": "example.com",
+    "MagicDNSSuffix": "tailnet.example"
+  },
+  "Peer": {
+    "nodekey:stub": {
+      "HostName": "stub-peer",
+      "RxBytes": $2,
+      "TxBytes": 0
+    }
+  }
+}
+EOF
+    mv -f "$socket.tmp" "$socket"
+}
+
+# A connected node's state after the stub CLI's down, logout or switch.
+connected_state() {
+    if [ -f "$socket.logged-out" ]; then
+        echo NeedsLogin
+    elif [ -f "$socket.down" ]; then
+        echo Stopped
+    else
+        echo Running
+    fi
+}
+
+mkdir -p "$(dirname "$socket")"
+rm -f "$socket"
+echo "stub tailscaled: mode $mode, socket $socket"
+rx_bytes=0
+sleep 1
+while :; do
+    case "$mode" in
+        running)
+            rx_bytes=$((rx_bytes + 2000))
+            write_status "$(connected_state)" "$rx_bytes"
+            ;;
+        quiet) write_status "$(connected_state)" 0 ;;
+        starting) write_status Starting 0 ;;
+        needs-login)
+            if [ -f "$socket.logged-in" ]; then
+                write_status "$(connected_state)" 0
+            else
+                write_status NeedsLogin 0
+            fi
+            ;;
+        hang) ;;
+    esac
+    sleep 1
+done

@@ -1,0 +1,41 @@
+#!/bin/sh
+# Stub curl for the simulations. It answers the one request the apps make:
+# WD's Run App switch (cmd=cgi_apps_set&f_module_name=<app>&f_enable=<0|1>,
+# posted to apkg_mgr.cgi), the way WD does: it stores the switch in the app's
+# apkg.xml (and in the dashboard's list, if there is one) and runs the app's
+# start.sh or stop.sh. Each request is appended to /tmp/curl.log.
+
+data=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -d | --data) data=$2; shift ;;
+        --max-time | -m) shift ;;
+    esac
+    shift
+done
+echo "$data" >> /tmp/curl.log
+
+case "$data" in
+    *cmd=cgi_apps_set*) ;;
+    *) exit 0 ;;
+esac
+name=$(echo "$data" | sed -n 's/.*f_module_name=\([A-Za-z0-9_]*\).*/\1/p')
+enable=$(echo "$data" | sed -n 's/.*f_enable=\([01]\).*/\1/p')
+app=/mnt/HD/HD_a2/Nas_Prog/$name
+[ -n "$name" ] && [ -n "$enable" ] && [ -f "$app/apkg.xml" ] || exit 0
+
+sed -i "s#<enable>[0-9]*</enable>#<enable>$enable</enable>#" "$app/apkg.xml"
+# The dashboard's list of all apps, when a test provides one.
+list=/var/www/xml/apkg_all.xml
+if [ -f "$list" ]; then
+    awk -v name="<name>$name</name>" -v enable="$enable" '
+        index($0, name) { found = 1 }
+        found && /<enable>/ { sub(/<enable>[0-9]*</, "<enable>" enable "<"); found = 0 }
+        { print }' "$list" > "$list.new" && mv -f "$list.new" "$list"
+fi
+if [ "$enable" = 1 ]; then
+    "$app/start.sh" "$app" > /dev/null 2>&1
+else
+    "$app/stop.sh" "$app" > /dev/null 2>&1
+fi
+echo '<?xml version="1.0" encoding="UTF-8"?><config><result>1</result></config>'

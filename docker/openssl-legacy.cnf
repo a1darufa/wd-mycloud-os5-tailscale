@@ -1,0 +1,17 @@
+# mksapkg-OS5 signs packages with `openssl bf-cbc` (Blowfish). OpenSSL 3 moved
+# Blowfish into the legacy provider, which is off by default. This config turns
+# it on alongside the default provider. It is only used inside the build image.
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+
+[provider_sect]
+default = default_sect
+legacy = legacy_sect
+
+[default_sect]
+activate = 1
+
+[legacy_sect]
+activate = 1

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Stub of WD's installer process for the simulations. The real upload_apkg
+# runs a whole install or upgrade and stores the new package's apkg.xml along
+# the way; the apps wait for a process of this name to exit. This one only
+# stays alive while /tmp/wd-installing exists.
+
+while [ -e /tmp/wd-installing ]; do
+    sleep 1
+done
