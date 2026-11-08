@@ -91,12 +91,18 @@ the daemon binary).
 - `upload_apkg` writes a debug log to `/tmp/upload_apkg_dbg.log` while
   `/tmp/dbg_upload_apkg` (or `/usr/local/config/dbg_upload_apkg`) exists, or
   with `-d`.
-- WD can lose the uploaded file's name. It happened twice on 2026-10-29,
-  both on a first attempt. The status record changed the name to `null`
+- WD can lose the uploaded file's name. It happened twice on 2026-10-29
+  and once on 2026-11-08, each time on a first attempt with the 36 MB
+  Tailscale package. The status record changed the name to `null`
   between two polls of the "re-install?" step. OK's request then took 10 s
   instead of 1 s and ran `upload_apkg -r null`, which failed with 101
-  ("Unable to upload app package"). It happens inside WD's upload step,
-  before any app script runs. Uploading again is the way out.
+  ("Unable to upload app package"), while the uploaded file stayed intact
+  in `/usr/local/apps_upload/`. It happens inside WD's upload step,
+  before any app script runs. Uploading again is the way out, and it has
+  worked every time. Running OK's own command on the uploaded file over SSH
+  should work too, but hasn't been tried: `upload_apkg -r <file name> -f 1
+  -g 0`. A good OK runs exactly that, with the bare file name; `upload_apkg`
+  looks for it in `/usr/local/apps_upload/` itself.
 - The dialog's poll (`apps_get_install_status()` in
   `/var/www/web/function/appsDiag.js`) has no error handler: one failed
   request ends the polling, and the dialog stays on "Updating". The CGI
@@ -111,6 +117,12 @@ the daemon binary).
   folder, regardless of WD's `<enable>`.
 - `stop.sh` runs right before `start.sh` at every boot, and twice during
   shutdown, so it must be harmless when nothing is running.
+- A script an app left running keeps running through an upgrade, on the
+  earlier version's code: the shell reads it from the deleted `ctl.sh`
+  (`/proc/<pid>/fd/10 -> …/ctl.sh (deleted)`). Seen 2026-11-07: both apps'
+  log keepers, started 2026-10-30 and 2026-11-05, outlived several upgrades
+  and held their locks, so a new version's keeper exited at once. From
+  Tailscale 1.104.4-6 a new keeper stops one running a deleted `ctl.sh`.
 - `/home/root` is in RAM: SSH keys added there are wiped by every reboot.
 - A Run App click right after an install can be dropped while the daemon is
   still busy (seen once, 3 s after install). Wait a few seconds.
@@ -171,6 +183,45 @@ the daemon binary).
   the previous page's. These apps' `index.html` is just an iframe holding
   their own page, plus empty versions of both functions.
 - The Configure button is greyed out while the app is OFF.
+- `desc.xml` is read by `get_app_desc()` (`/var/www/web/function/app_menu.js`),
+  which takes the text of the tag for the dashboard's language and nothing
+  else: with no tag for it, the description is empty. Its 18 languages, by
+  index: `en-US fr-FR it-IT de-DE es-ES zh-CN zh-TW ko-KR ja-JP ru-RU pt-BR
+  cs-CZ nl-NL hu-HU no-NO pl-PL sv-SE tr-TR` (checked 2026-11-07). Both
+  apps' `desc.xml` have all 18, and `tests/run-all.sh` checks it.
+
+## Alerts
+
+Checked on 5.33.102 (2026-11-07), read-only:
+
+- `/usr/sbin/fireAlert` raises the alerts the dashboard shows under its bell
+  icon and e-mails when alert e-mails are set up:
+  `fireAlert -a <code> -p "<param1>,<param2>" -f` raises one, `-g` lists them,
+  `-s <seq> -r` removes one, `-a <code> -x` removes all with that code.
+  `sendAlert.sh` doesn't exist here.
+- The codes and their texts are in `/etc/nas/alert-param.sh` and
+  `/etc/nas/strings/<language>/alertmessages.txt`. None takes free text alone.
+  The only one for apps is 1501, `appUpdateAvailable`: title "App Update
+  Available", text "A new version of the following app(s) has been released.
+  Please update the app(s) at your earliest convenience.%1". The Tailscale
+  app uses it, with its own text as `%1`.
+- `-g` prints each alert as `---->[item N]`, then `alertCode = …`,
+  `alertSeqNum = …`, `alertMSG:[…]`, `alertDesc:[…]` (with `%1` filled in),
+  `alertTime:[…]` and `counts:[…]`. So an app can find and remove its own
+  alerts by their text, leaving other apps' 1501 alerts alone.
+- The parameter is split at commas. From another OS5 Tailscale app
+  (la32094uf/mycloud-tailscale), not checked here yet: WD drops a text longer
+  than about 124 characters or holding `<`, `>` or `&`, and counts a repeat of
+  the same code instead of showing its new text.
+
+## Kernel
+
+- No iptables `nat` table (`iptables -t nat -L` exits 3: "Table does not
+  exist"), for IPv4 or IPv6 (checked 2026-11-07). tailscaled's default
+  netfilter mode then fails to add its NAT chain and says so in a health
+  warning. The Tailscale app passes `--netfilter-mode=off
+  --snat-subnet-routes=false` instead (checked: `tailscale set`, `up` and
+  `login` 1.104.4 all take both).
 
 ## Web server
 

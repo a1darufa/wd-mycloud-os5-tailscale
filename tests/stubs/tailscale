@@ -8,7 +8,9 @@
 #   <socket>.key-source where the last login read its key from (not the key)
 #   <socket>.logged-out logged out, or a login's new profile not in yet
 #   <socket>.down       "tailscale down"
-#   <socket>.up-args, <socket>.switch-args  the arguments of the last up, switch
+#   <socket>.up-args, <socket>.switch-args, <socket>.login-args  the arguments
+#                       of the last up, switch, login (no key: it's in a file)
+#   <socket>.nat        the NAT prefs: NetfilterMode (0 off, 2 on) and NoSNAT
 # An auth key is accepted if it ends in "good". Like the real one, "login"
 # first leaves the current profile, so a refused key leaves the node logged
 # out until "switch" returns to the old one.
@@ -48,10 +50,31 @@ EOF
 }
 [ -f "$socket.prefs" ] || write_prefs "" null true
 
+# The NAT prefs, which "set", "up" and "login" all take, are kept apart from
+# the rest, so a "set" of only those leaves the others alone, as it would.
+read_nat_prefs() {
+    netfilter_mode=2 no_snat=false
+    [ -f "$socket.nat" ] && read -r netfilter_mode no_snat < "$socket.nat"
+}
+take_nat_flag() { # <argument>; false if it isn't a NAT flag
+    case "$1" in
+        --netfilter-mode=off) netfilter_mode=0 ;;
+        --netfilter-mode=nodivert) netfilter_mode=1 ;;
+        --netfilter-mode=on) netfilter_mode=2 ;;
+        --snat-subnet-routes=false) no_snat=true ;;
+        --snat-subnet-routes | --snat-subnet-routes=true) no_snat=false ;;
+        *) return 1 ;;
+    esac
+    echo "$netfilter_mode $no_snat" > "$socket.nat"
+}
+
 # "tailscale set" with the flags the app passes.
 set_prefs() {
-    hostname="" routes="" exit_node=false auto_update=true
+    read_nat_prefs
+    page_flags=false hostname="" routes="" exit_node=false auto_update=true
     for arg in "$@"; do
+        take_nat_flag "$arg" && continue
+        page_flags=true
         case "$arg" in
             --hostname=*) hostname=${arg#*=} ;;
             --advertise-routes=*) routes=${arg#*=} ;;
@@ -63,6 +86,7 @@ set_prefs() {
                 ;;
         esac
     done
+    "$page_flags" || return 0
     [ "$exit_node" = true ] && routes="${routes:+$routes,}0.0.0.0/0,::/0"
     if [ -n "$routes" ]; then
         routes_json="[\"$(echo "$routes" | sed 's/,/", "/g')\"]"
@@ -74,8 +98,11 @@ set_prefs() {
 }
 
 login() {
+    echo "$*" > "$socket.login-args"
+    read_nat_prefs
     key_file=""
     for arg in "$@"; do
+        take_nat_flag "$arg" && continue
         case "$arg" in
             --auth-key=file:*) key_file=${arg#--auth-key=file:} ;;
             --auth-key=*)
@@ -120,7 +147,10 @@ case "$1" in
         ;;
     debug)
         [ "${2:-}" = prefs ] || exit 2
-        cat "$socket.prefs"
+        read_nat_prefs
+        awk -v mode="$netfilter_mode" -v no_snat="$no_snat" '
+            NR == 1 { print; printf "\t\"NetfilterMode\": %s,\n\t\"NoSNAT\": %s,\n", mode, no_snat; next }
+            { print }' "$socket.prefs"
         ;;
     set)
         shift
@@ -136,6 +166,10 @@ case "$1" in
     up)
         shift
         echo "$*" > "$socket.up-args"
+        read_nat_prefs
+        for arg in "$@"; do
+            take_nat_flag "$arg"
+        done
         rm -f "$socket.down"
         sleep 1 # the stub daemon reports Running within a second
         ;;

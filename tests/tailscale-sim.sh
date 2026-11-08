@@ -6,8 +6,9 @@
 # (tests/stubs) standing in for tailscaled. A twonky-style hook daemon runs
 # from /mnt/HD/HD_a2/tailscale for scenarios 1-13; the last ones cover a NAS
 # with Tailscale started some other way, one without Tailscale, the Configure
-# page's commands on that new node, and an upgrade of a node that was
-# disconnected on purpose.
+# page's commands on that new node, an upgrade of a node that was
+# disconnected on purpose, and WD alerts about the login. iptables has no NAT
+# table, as on the NAS.
 #
 # Usage (from WSL, repo root):
 #   tailscale/build.sh --stub running
@@ -29,7 +30,7 @@ HOOK=/mnt/HD/HD_a2/tailscale
 HEADER_BYTES=204
 
 # Short timings so the whole run takes a couple of minutes.
-export TS_START_TIMEOUT=6 TS_PROOF_TIMEOUT=6 TS_STOP_TIMEOUT=3 TS_POLL_INTERVAL=1 TS_KEEPER_INTERVAL=1 TS_DASHBOARD_DELAY=1 TS_BOOT_DASHBOARD_DELAY=1
+export TS_START_TIMEOUT=6 TS_PROOF_TIMEOUT=6 TS_STOP_TIMEOUT=3 TS_POLL_INTERVAL=1 TS_KEEPER_INTERVAL=1 TS_DASHBOARD_DELAY=1 TS_BOOT_DASHBOARD_DELAY=1 TS_CHECK_ROUNDS=2
 # Stand-ins for the kernel's forwarding switches (/proc/sys is read-only here).
 export TS_PROC_SYS=/tmp/proc-sys
 
@@ -93,9 +94,52 @@ ctl_busy() {
 }
 wait_idle() { wait_for "! ctl_busy" 60; }
 
+# Running log keepers, and those still running a deleted (earlier) ctl.sh.
+# A keeper's subshells share its command line; those are left out.
+keeper_procs() {
+    all=" "
+    for proc in /proc/[0-9]*; do
+        case "$(tr '\0' ' ' 2> /dev/null < "$proc/cmdline")" in
+            *"ctl.sh log-keeper"*) all="$all${proc#/proc/} " ;;
+        esac
+    done
+    for pid in $all; do
+        case "$all" in
+            *" $(awk '{ print $4 }' "/proc/$pid/stat" 2> /dev/null) "*) ;;
+            *) echo "/proc/$pid" ;;
+        esac
+    done
+}
+keepers() { keeper_procs | wc -l; }
+stale_keepers() {
+    for proc in $(keeper_procs); do
+        for fd in "$proc"/fd/*; do
+            case "$(readlink "$fd" 2> /dev/null)" in
+                *"ctl.sh (deleted)")
+                    echo "$proc"
+                    break
+                    ;;
+            esac
+        done
+    done | wc -l
+}
+
 # Log checks only look at lines written since the last mark_log.
 mark_log() { log_mark=$(wc -l < "$APP_HOME/log/app.log" 2> /dev/null || echo 0); }
 logged() { tail -n +$((log_mark + 1)) "$APP_HOME/log/app.log" 2> /dev/null | grep -q -- "$1"; }
+
+# WD alerts, as the stub fireAlert keeps them: one file per alert in
+# /tmp/alerts (code, then text), every call in /tmp/alerts.log.
+alerted() { grep -qF -- "$1" /tmp/alerts/* 2> /dev/null; }
+tailscale_alerts() { grep -lF ' Tailscale: ' /tmp/alerts/* 2> /dev/null | wc -l; }
+alerts_sent() { cat /tmp/alerts.log 2> /dev/null | grep -cF -- "$1"; }
+# Texts WD would drop or split: too long, or holding < > & or commas.
+bad_alert_texts() {
+    for alert in /tmp/alerts/*; do
+        [ -f "$alert" ] && sed -n 2p "$alert"
+    done | awk 'length > 121 || /[,<>&]/'
+}
+clear_alerts() { rm -rf /tmp/alerts /tmp/alerts.seq /tmp/alerts.log "$APP_HOME/alerts"; }
 
 enabled() { grep -q '<enable>1</enable>' "$APP/apkg.xml"; }
 set_enable() { sed -i "s#<enable>[0-9]*</enable>#<enable>$1</enable>#" "$APP/apkg.xml"; }
@@ -210,11 +254,12 @@ mkdir -p "$NAS_PROG" /mnt/HD/HD_a2/.systemfile /var/www "$HOOK/state" \
     "$TS_PROC_SYS/net/ipv4" "$TS_PROC_SYS/net/ipv6/conf/all"
 echo 0 > "$TS_PROC_SYS/net/ipv4/ip_forward"
 echo 0 > "$TS_PROC_SYS/net/ipv6/conf/all/forwarding"
-# WD's Run App switch, as the apps call it after an upgrade, and WD's
-# installer process, which they wait for.
+# WD's Run App switch, as the apps call it after an upgrade, WD's installer
+# process, which they wait for, WD's alerts, and iptables without a NAT
+# table, as on the NAS.
 mkdir -p /usr/local/bin
-cp "$STUBS/curl" "$STUBS/upload_apkg" /usr/local/bin/
-chmod 755 /usr/local/bin/curl /usr/local/bin/upload_apkg
+cp "$STUBS/curl" "$STUBS/upload_apkg" "$STUBS/fireAlert" "$STUBS/iptables" /usr/local/bin/
+chmod 755 /usr/local/bin/curl /usr/local/bin/upload_apkg /usr/local/bin/fireAlert /usr/local/bin/iptables
 cp "$STUBS/tailscaled" "$STUBS/tailscale" "$HOOK/"
 chmod 755 "$HOOK/tailscaled" "$HOOK/tailscale"
 echo hook-identity > "$HOOK/state/tailscaled.state"
@@ -245,6 +290,7 @@ expect "[ \$(daemon_count) -eq 1 ]" "exactly one tailscaled"
 expect "grep -q hook-identity '$APP_HOME/state/tailscaled.state'" "the state was copied"
 expect "grep -q hook-identity '$HOOK/state/tailscaled.state'" "the hook's state is untouched"
 expect "logged 'hook daemon is Running again'" "the restored daemon was verified"
+expect "alerted 'taking over the Tailscale started by hand' && [ \"\$(bad_alert_texts)\" = '' ]" "a WD alert says so, in a text WD shows whole"
 
 section "3. A failed cutover is not retried on its own"
 wd_switch_off
@@ -295,6 +341,15 @@ expect "logged 'peer traffic'" "proof came from received bytes"
 expect "ours_running && ! hook_running" "the app's daemon runs"
 
 section "7. Upgrade while ON"
+# On the NAS the log keeper sleeps a minute between rounds, so unlike the
+# one-second keepers here, it outlives the moment the upgrade restarts the
+# daemon. One like it:
+for proc in $(keeper_procs); do
+    kill "${proc#/proc/}"
+done
+wait_for "[ \"\$(keepers)\" = 0 ]" 5
+(TS_KEEPER_INTERVAL=30 nohup sh "$APP/ctl.sh" log-keeper > /dev/null 2>&1 < /dev/null &)
+wait_for "[ \"\$(keepers)\" = 1 ]" 5
 old_pid=$(our_pid)
 mark_log
 : > /tmp/curl.log
@@ -311,6 +366,9 @@ expect "enabled && logged 'Run App back ON, as it was before'" "WD's switch is p
 expect "[ \"\$(stat -c %a:%U '$APP/apkg.xml')\" = \"\$(stat -c %a:%U '$STAGED/apkg.xml')\" ]" "apkg.xml keeps its mode and owner"
 expect "[ ! -s /tmp/curl.log ] && logged 'shows ON in the dashboard again'" "nothing to ask WD for: the dashboard's list follows apkg.xml"
 expect "[ \"\$(dialog_status)\" = 1 ] && ! logged 'Updating dialog'" "WD's dialog got WD's result; the app left it alone"
+wait_for "logged 'stopping the log keeper an earlier version started'" 10
+wait_for "[ \"\$(keepers)\" = 1 ]" 10
+expect "logged 'stopping the log keeper an earlier version started' && [ \"\$(keepers)\" = 1 ] && [ \"\$(stale_keepers)\" = 0 ]" "the earlier version's log keeper makes way for this version's"
 
 # WD records "installed", but the dialog's copy stays at 100.
 old_pid=$(our_pid)
@@ -349,6 +407,7 @@ expect "our_binary_is '$APP_HOME/lkg'" "running from lkg/"
 expect "[ \$(daemon_count) -eq 1 ]" "exactly one tailscaled"
 expect "logged 'asking WD to show Run App ON' && grep -q '<enable>1</enable>' /var/www/xml/apkg_all.xml" "a list that still says OFF: it asks WD, and the list agrees"
 expect "[ \$(daemon_count) -eq 1 ] && our_binary_is '$APP_HOME/lkg'" "WD's start.sh left the lkg/ daemon alone"
+expect "alerted 'An earlier version runs instead' && [ \"\$(tailscale_alerts)\" = 1 ]" "a WD alert says so, replacing the app's earlier one"
 rm -f /var/www/xml/apkg_all.xml
 
 section "9. Reboot after an upgrade left Run App OFF"
@@ -421,6 +480,7 @@ wd_uninstall
 
 section "15. A NAS without Tailscale: a new node"
 rm -rf "$APP_HOME"
+rm -f /var/run/tailscale/tailscaled.sock.*
 wd_install needs-login
 mark_log
 wd_switch_on
@@ -429,6 +489,9 @@ wait_idle
 expect "logged 'starting a new node' && logged 'tailscale up'" "a new node was started, and the login step logged"
 expect "ours_running && [ \$(daemon_count) -eq 1 ]" "exactly one tailscaled, the app's"
 expect "[ ! -f '$APP_HOME/cutover-failed' ] && [ -x '$APP_HOME/lkg/tailscaled' ]" "no failure recorded; binaries saved as last-known-good"
+wait_for "ctl web-status | grep -q '\"NetfilterMode\": 0,'" 10
+expect "ctl web-status | grep -q '\"NetfilterMode\": 0,' && ctl web-status | grep -q '\"NoSNAT\": true,' && logged 'no NAT in this kernel'" "no NAT table: the log keeper tells tailscaled to leave the firewall alone"
+expect "ctl web-status | grep -q '\"nat\":false'" "and web-status says the kernel has no NAT"
 
 section "16. The Configure page's commands, as api.php runs them"
 # shellcheck disable=SC2034 # read in expect's eval
@@ -443,6 +506,7 @@ mark_log
 result=$(echo "auth_key=$key" | ctl web-login)
 expect "[ \"\$result\" = ok=1 ] && [ \"\$(cat /var/run/tailscale/tailscaled.sock.key-source)\" = /proc/self/fd/0 ]" "web-login with a key logs in, handing the key over on stdin"
 expect "logged 'logged in with an auth key' && ! grep -qF '$key' '$APP_HOME/log/app.log'" "the login is logged, the key isn't"
+expect "grep -qF -- '--netfilter-mode=off --snat-subnet-routes=false' /var/run/tailscale/tailscaled.sock.login-args" "the new login profile gets the NAT flags from the start"
 wait_for "ctl web-status | grep -q '\"BackendState\": \"Running\"'" 5
 flock "$APP_HOME/lock" sleep 3 &
 wait_for "! flock -n '$APP_HOME/lock' true" 3
@@ -453,6 +517,12 @@ wait
 # shellcheck disable=SC2034 # read in expect's eval
 result=$(printf 'hostname=nas\nroutes=192.168.1.0/24\nexit_node=false\nauto_update=true\n' | ctl web-set)
 expect "[ \"\$result\" = ok=1 ] && [ \"\$(cat '$TS_PROC_SYS/net/ipv4/ip_forward')\" = 1 ] && [ \"\$(cat '$TS_PROC_SYS/net/ipv6/conf/all/forwarding')\" = 0 ]" "web-set with an IPv4 route turns on IPv4 forwarding only"
+expect "grep -qF -- '--auto-update=true --netfilter-mode=off --snat-subnet-routes=false' /var/run/tailscale/tailscaled.sock.set-args" "and passes the NAT flags along"
+touch /tmp/kernel-has-nat
+# shellcheck disable=SC2034 # read in expect's eval
+result=$(printf 'hostname=nas\nroutes=192.168.1.0/24\nexit_node=false\nauto_update=true\n' | ctl web-set)
+expect "[ \"\$result\" = ok=1 ] && ! grep -q netfilter /var/run/tailscale/tailscaled.sock.set-args && ctl web-status | grep -q '\"nat\":true'" "a kernel with NAT: no NAT flags"
+rm -f /tmp/kernel-has-nat
 echo 0 > "$TS_PROC_SYS/net/ipv4/ip_forward"
 wd_switch_off
 mark_log
@@ -487,6 +557,39 @@ wait_idle
 expect "logged 'Stopped) to this version' && our_binary_is '$APP/bin' && ! logged 'not running after'" "it moves to the new binary without falling back: Stopped can't become Running"
 expect "ctl web-status | grep -q '\"BackendState\": \"Stopped\"'" "and stays disconnected, as chosen"
 rm -f /var/run/tailscale/tailscaled.sock.down
+wd_uninstall
+
+section "18. WD alerts about the login"
+SOCK=/var/run/tailscale/tailscaled.sock
+power_off
+rm -rf "$APP_HOME"
+rm -f "$SOCK".*
+clear_alerts
+wd_install running
+wd_switch_on
+wait_for "[ -f '$APP_HOME/cutover-ok' ]" 20
+wait_idle
+wait_for "ctl web-status | grep -q '\"BackendState\": \"Running\"'" 5
+sleep 3
+expect "[ \"\$(tailscale_alerts)\" = 0 ]" "a connected node without key expiry raises nothing"
+# Another app's update alert, which shares WD's code 1501.
+fireAlert -a 1501 -p " Plex Media Server" -f
+date -u -d "@$(($(date +%s) + 3 * 86400 + 3600))" +%Y-%m-%dT%H:%M:%SZ > "$SOCK.key-expiry"
+wait_for "alerted 'login expires in 3 days'" 10
+expect "alerted 'login expires in 3 days' && [ \"\$(bad_alert_texts)\" = '' ]" "a login expiring within a week raises an alert"
+rm -f "$SOCK.key-expiry"
+touch "$SOCK.node-key" "$SOCK.logged-out"
+wait_for "alerted 'logged out of its tailnet'" 10
+expect "alerted 'logged out of its tailnet' && [ \"\$(tailscale_alerts)\" = 1 ]" "logged out without being asked (key kept): an alert, replacing the app's earlier one"
+expect "alerted 'Plex Media Server'" "another app's update alert stays"
+sleep 5
+expect "[ \"\$(alerts_sent 'logged out of its tailnet')\" = 1 ]" "the same alert goes out at most once a day"
+rm -f "$SOCK.node-key" "$SOCK.logged-out" "$APP_HOME/alerts/logged-out"
+wait_for "ctl web-status | grep -q '\"BackendState\": \"Running\"'" 5
+# shellcheck disable=SC2034 # read in expect's eval
+result=$(ctl web-logout)
+sleep 5
+expect "[ \"\$result\" = ok=1 ] && [ \"\$(alerts_sent 'logged out of its tailnet')\" = 1 ]" "logging out on the Configure page raises nothing"
 wd_uninstall
 
 if [ "$failures" -ne 0 ]; then

@@ -38,6 +38,7 @@
         keyStatus: $("key-status"),
         switchCancel: $("switch-cancel"),
         settings: $("settings"),
+        noNat: $("no-nat"),
         save: $("save"),
         saveStatus: $("save-status"),
         leave: $("leave"),
@@ -192,6 +193,7 @@
         renderLeave(status);
         page.settings.hidden = switching
             || !(status.daemon === "running" && status.backend_state === "Running" && status.prefs);
+        page.noNat.hidden = status.nat;
     }
 
     function fillSettings(prefs) {

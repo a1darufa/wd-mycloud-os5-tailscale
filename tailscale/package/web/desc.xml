@@ -1,5 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The dashboard shows only the tag of its own language, with no fallback
+     (get_app_desc in /var/www/web/function/app_menu.js), so every one of its
+     18 languages has an entry: English, except Russian. -->
 <config>
   <en-US>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</en-US>
+  <fr-FR>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</fr-FR>
+  <it-IT>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</it-IT>
+  <de-DE>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</de-DE>
+  <es-ES>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</es-ES>
+  <zh-CN>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</zh-CN>
+  <zh-TW>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</zh-TW>
+  <ko-KR>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</ko-KR>
+  <ja-JP>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</ja-JP>
   <ru-RU>Tailscale для этого NAS. Сохраняет идентичность узла при обновлениях и возвращается к прежнему демону, если новый не запускается. Вход и настройки — на странице настроек приложения. Выключение Run App отключает NAS от вашей сети Tailscale.</ru-RU>
+  <pt-BR>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</pt-BR>
+  <cs-CZ>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</cs-CZ>
+  <nl-NL>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</nl-NL>
+  <hu-HU>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</hu-HU>
+  <no-NO>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</no-NO>
+  <pl-PL>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</pl-PL>
+  <sv-SE>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</sv-SE>
+  <tr-TR>Tailscale for this NAS. Keeps the node's identity across upgrades and falls back to the previous daemon if a new one fails. Log in and change settings under Configure. Switching Run App OFF disconnects the NAS from your tailnet.</tr-TR>
 </config>

@@ -54,7 +54,7 @@ You can change:
 - whether Tailscale updates itself.
 
 These apply at once. Routes and the exit node turn on IP forwarding on the NAS, and still need approval in the admin console.
-- **Exit node and routes on the EX2 Ultra:** its kernel has no iptables NAT, so tailscaled can't NAT forwarded traffic. Both most likely work only if your router has a route back to 100.64.0.0/10 through the NAS; this is untested.
+- **Exit node and routes on the EX2 Ultra:** its kernel has no iptables NAT, so tailscaled can't NAT forwarded traffic. The app notices and starts Tailscale with `--netfilter-mode=off --snat-subnet-routes=false`, which keeps tailscaled from trying (and from showing a health warning about it), and the page shows a note under these settings. Both most likely work only if your router has a route back to 100.64.0.0/10 through the NAS; this is untested.
 
 The page can also take the NAS off its tailnet:
 - **Disconnect:** offline, still logged in; **Connect** brings it back.
@@ -64,6 +64,18 @@ The page can also take the NAS off its tailnet:
 If the NAS is far away, Tailscale may be your only way in, so each of these asks twice: a checkbox ("I can reach this NAS without Tailscale"), then a confirmation. When the page notices it was opened through Tailscale, it says that it will stop answering; switching from there then only takes an auth key, which can't leave the NAS stranded between tailnets.
 
 Tailscale SSH and using other devices' routes or exit nodes aren't on the page; use the `tailscale` command over SSH for those.
+
+## Alerts
+
+The app raises a WD alert, under the dashboard's bell icon, when something needs you:
+- the NAS was logged out without being asked: its login expired, or it was removed in the admin console;
+- its login expires within 7 days (only if key expiry is on for it);
+- a new version didn't start or connect, and an earlier one runs instead;
+- taking over a Tailscale started by hand didn't work, and the old one runs again.
+
+With alert e-mails set up (**Settings → Notifications**), they reach your mailbox too, which matters most when the NAS is far away. Each kind goes out at most once a day.
+
+WD lets an app use only one alert, titled **App Update Available**, which starts with WD's own sentence about a new app version. The app's text follows it, starting with "Tailscale:". Logging out on the Configure page raises nothing.
 
 ## Updating
 

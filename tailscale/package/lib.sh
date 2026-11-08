@@ -21,6 +21,9 @@
 #   which checks every value again. Those last three can cut a remote NAS
 #   off, so the page asks twice; Tailscale SSH and other nodes' routes aren't
 #   offered at all.
+# - What needs the owner (logged out, login expiring, a version that didn't
+#   start, a takeover that switched back) raises a WD alert, which reaches the
+#   dashboard's bell icon and the owner's mailbox.
 
 TS_PACKAGE=tailscale
 TS_VOLUME=/mnt/HD/HD_a2
@@ -77,6 +80,19 @@ TS_WD_APP_LIST=${TS_WD_APP_LIST:-/var/www/xml/apkg_all.xml}
 TS_WD_INSTALL_RESULT=/tmp/upload_apkg_status
 TS_WD_INSTALL_RECORD=/var/www/xml/apkg_state.xml
 
+# WD's alerts (the dashboard's bell icon, and e-mail when alert e-mails are
+# set up). An app can only use code 1501, which WD titles "App Update
+# Available" and opens with a fixed sentence about a new app version; the
+# app's text follows it. Each kind of alert goes out at most once a day; the
+# files in TS_ALERT_DIR say when it last did.
+TS_WD_ALERT_CODE=1501
+TS_ALERT_DIR=$TS_HOME/alerts
+TS_ALERT_INTERVAL=86400
+# Warn this many days before the node's login (its key) expires.
+TS_EXPIRY_WARN_DAYS=7
+# The log keeper checks the login and the NAT prefs every this many rounds.
+TS_CHECK_ROUNDS=${TS_CHECK_ROUNDS:-10}
+
 # How long to wait at most for WD's installer to exit; how long to let a
 # boot settle, and how far apart to check, before asking WD to show Run App ON.
 TS_WD_INSTALL_TIMEOUT=${TS_WD_INSTALL_TIMEOUT:-120}
@@ -107,6 +123,61 @@ ts_log() {
     mkdir -p "$TS_LOG_DIR" 2> /dev/null || return 0
     ts_rotate_if_large "$TS_LOG_DIR/app.log"
     echo "$(date '+%Y-%m-%d %H:%M:%S') ${TS_LOG_TAG}[$$]: $*" >> "$TS_LOG_DIR/app.log"
+}
+
+# --- WD alerts ---------------------------------------------------------------
+
+# Raise a WD alert of <kind> (a file name, such as logged-out) saying
+# "Tailscale: <text>", unless that kind went out within TS_ALERT_INTERVAL.
+# WD drops a text longer than about 124 characters or holding < > &, and
+# splits it at commas, so those go. The leading space keeps it apart from
+# WD's sentence, which ends in a full stop.
+ts_alert() {
+    command -v fireAlert > /dev/null 2>&1 || return 0
+    mkdir -p "$TS_ALERT_DIR"
+    ts_alert_stamp=$TS_ALERT_DIR/$1
+    if [ -f "$ts_alert_stamp" ]; then
+        ts_alert_age=$(($(date +%s) - $(stat -c %Y "$ts_alert_stamp")))
+        [ "$ts_alert_age" -ge "$TS_ALERT_INTERVAL" ] || return 0
+    fi
+    ts_alert_text=$(printf ' Tailscale: %s' "$2" | tr -d '<>&,\n' | cut -c 1-120)
+    ts_clear_alerts
+    if fireAlert -a "$TS_WD_ALERT_CODE" -p "$ts_alert_text" -f > /dev/null 2>&1; then
+        touch "$ts_alert_stamp"
+        ts_log "WD alert sent:$ts_alert_text"
+    else
+        ts_log "WD alert couldn't be sent:$ts_alert_text"
+    fi
+}
+
+# Remove this app's earlier alerts, so the newest text shows: WD counts a
+# repeat of the same code instead of showing it. Other apps' update alerts
+# share the code, so only those holding " Tailscale: " go.
+ts_clear_alerts() {
+    for ts_seq in $(fireAlert -g 2> /dev/null | awk -v code="$TS_WD_ALERT_CODE" '
+        /^---->/ { this_code = ""; seq = "" }
+        /^alertCode = / { this_code = $3 }
+        /^alertSeqNum = / { seq = $3 }
+        /^alertDesc:/ && this_code == code && index($0, " Tailscale: ") { print seq }'); do
+        fireAlert -s "$ts_seq" -r > /dev/null 2>&1
+    done
+}
+
+# --- the kernel's NAT ----------------------------------------------------------
+
+# The EX2 Ultra's kernel has no iptables nat table, so tailscaled can't set up
+# its firewall and NAT rules, and says so in a health warning. Without one,
+# it's told not to try: forwarded traffic goes out unchanged, as it did
+# anyway, so routes and the exit node need the router to send replies for
+# 100.64.0.0/10 back through the NAS.
+ts_kernel_has_nat() {
+    iptables -t nat -L -n > /dev/null 2>&1
+}
+
+# The flags that say so, for "tailscale up", "set" and "login"; none if the
+# kernel has NAT. Two words without spaces in them, for word splitting.
+ts_nat_flags() {
+    ts_kernel_has_nat || echo "--netfilter-mode=off --snat-subnet-routes=false"
 }
 
 # --- processes ---------------------------------------------------------------
@@ -303,6 +374,9 @@ ts_launch_best() {
         case $? in
             0)
                 ts_log "tailscaled from $ts_dir is $ts_launch_goal"
+                if [ "$ts_dir" != "$TS_APP_DIR/bin" ]; then
+                    ts_alert fallback "this version didn't start or connect. An earlier version runs instead; see the app's log."
+                fi
                 ts_spawn_log_keeper
                 return 0
                 ;;
@@ -313,6 +387,7 @@ ts_launch_best() {
                 ts_log "tailscaled from $ts_dir is not $ts_launch_goal after ${TS_START_TIMEOUT}s"
                 if [ "$ts_dir" = "$ts_last_candidate" ]; then
                     ts_log "no candidates left; keeping it running in case it connects later"
+                    ts_alert start "no version reached the tailnet after starting. It keeps trying; see the app's log."
                     ts_spawn_log_keeper
                     return 1
                 fi
@@ -321,6 +396,7 @@ ts_launch_best() {
         esac
     done
     ts_log "no tailscaled could be started"
+    ts_alert start "tailscaled couldn't be started at all. The NAS is off its tailnet; see the app's log."
     return 1
 }
 

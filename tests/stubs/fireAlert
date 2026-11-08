@@ -1,0 +1,65 @@
+#!/bin/sh
+# Stub of WD's fireAlert, with the options the apps use. Alerts live as files
+# in /tmp/alerts (one per alert, named by its sequence number, holding the
+# code and the text), so "-g" lists them the way WD's prints them; every call
+# is also appended to /tmp/alerts.log.
+#   fireAlert -a <code> -p "<text>" -f   raise an alert (WD's text, %1 = <text>)
+#   fireAlert -g                         list the alerts
+#   fireAlert -s <seq> -r                remove one alert
+#   fireAlert -a <code> -x               remove every alert with <code>
+
+dir=/tmp/alerts
+mkdir -p "$dir"
+echo "$*" >> /tmp/alerts.log
+
+code="" text="" seq="" action=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -a) code=$2; shift 2 ;;
+        -p) text=$2; shift 2 ;;
+        -s) seq=$2; shift 2 ;;
+        -f | -g | -r | -x) action=$1; shift ;;
+        *) echo "stub fireAlert: unsupported option: $1" >&2; exit 1 ;;
+    esac
+done
+
+# WD's own wording for the codes the tests use.
+describe() {
+    case "$1" in
+        1501) echo "A new version of the following app(s) has been released. Please update the app(s) at your earliest convenience.$2" ;;
+        *) echo "Alert $1.$2" ;;
+    esac
+}
+
+case "$action" in
+    -f)
+        seq=$(($(cat "$dir.seq" 2> /dev/null || echo 0) + 1))
+        echo "$seq" > "$dir.seq"
+        printf '%s\n%s\n' "$code" "$text" > "$dir/$seq"
+        ;;
+    -g)
+        item=0
+        for path in "$dir"/*; do
+            [ -f "$path" ] || continue
+            item=$((item + 1))
+            this_code=$(sed -n 1p "$path")
+            printf -- '---->[item %s]\ncustomer = 1\nalertCode = %s\nalertID = 0\nalertSeqNum = %s\npriority = 1\n' \
+                "$item" "$this_code" "${path##*/}"
+            printf 'alertMSG:[App Update Available] \nalertDesc:[%s] \ncounts:[1] \n' \
+                "$(describe "$this_code" "$(sed -n 2p "$path")")"
+        done
+        ;;
+    -r)
+        rm -f "$dir/$seq"
+        ;;
+    -x)
+        for path in "$dir"/*; do
+            [ -f "$path" ] && [ "$(sed -n 1p "$path")" = "$code" ] && rm -f "$path"
+        done
+        ;;
+    *)
+        echo "stub fireAlert: nothing to do" >&2
+        exit 1
+        ;;
+esac
+exit 0

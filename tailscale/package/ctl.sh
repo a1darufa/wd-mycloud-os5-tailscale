@@ -7,7 +7,8 @@
 #   upgrade-restart  move the running daemon to this version's binary
 #   cutover          first start: take over a hand-started Tailscale, with
 #                    revert, or start a new node if there is none
-#   log-keeper       cap tailscaled.log while the daemon runs
+#   log-keeper       while the daemon runs: cap tailscaled.log, keep the NAT
+#                    prefs right, and raise WD alerts about the login
 #   restore-run-app  after an upgrade, put WD's Run App switch back ON, and
 #                    end WD's "Updating" dialog if it's stuck
 #   dashboard-on     at boot, ask WD to show Run App ON if should-run says so
@@ -112,6 +113,7 @@ revert_cutover() {
     # shellcheck disable=SC2086
     (nohup $hook_cmd >> "$TS_HOOK_DIR/tailscaled.log" 2>&1 < /dev/null 9>&- &)
     echo "$(date '+%Y-%m-%d %H:%M:%S') $reason" > "$TS_CUTOVER_FAILED"
+    ts_alert takeover "taking over the Tailscale started by hand didn't work. The old one runs again; see the app's log."
 
     sleep 1   # let the detached start reach exec before looking it up
     hook_pid=$(pidof tailscaled | awk '{ print $1 }')
@@ -267,12 +269,99 @@ make_dashboard_agree() {
 }
 
 cmd_log_keeper() {
+    stop_stale_keepers
     exec 8> "$TS_KEEPER_LOCK"
-    flock -n 8 || exit 0
+    # A stopped keeper's sleep may hold the lock until it ends (up to
+    # 1.104.4-5 it did), so wait one round for it. Another keeper of this
+    # version keeps it: then this one isn't needed.
+    waited=0
+    until flock -n 8; do
+        [ "$waited" -lt $((TS_KEEPER_INTERVAL + 5)) ] || exit 0
+        sleep 1
+        waited=$((waited + 1))
+    done
+    round=0
     while [ -n "$(ts_our_pids)" ]; do
         ts_truncate_if_large "$TS_LOG_DIR/tailscaled.log"
-        sleep "$TS_KEEPER_INTERVAL"
+        # Right after a start, then every TS_CHECK_ROUNDS rounds.
+        if [ $((round % TS_CHECK_ROUNDS)) -eq 0 ]; then
+            keep_nat_prefs
+            check_login
+        fi
+        round=$((round + 1))
+        sleep "$TS_KEEPER_INTERVAL" 8>&-
     done
+}
+
+# The daemon keeps running through an upgrade, and so does its log keeper:
+# it holds the lock and runs the earlier version's code, read from its
+# deleted ctl.sh, so this version's checks would never run. Stop such
+# keepers; one running this version's ctl.sh is left alone.
+stop_stale_keepers() {
+    for proc in /proc/[0-9]*; do
+        case "$(ts_cmdline "${proc#/proc/}")" in
+            *"$TS_APP_DIR/ctl.sh log-keeper"*) ;;
+            *) continue ;;
+        esac
+        for fd in "$proc"/fd/*; do
+            if [ "$(readlink "$fd" 2> /dev/null)" = "$TS_APP_DIR/ctl.sh (deleted)" ]; then
+                ts_log "stopping the log keeper an earlier version started (pid ${proc#/proc/})"
+                kill "${proc#/proc/}" 2> /dev/null
+                break
+            fi
+        done
+    done
+}
+
+# Without the kernel's NAT (see ts_kernel_has_nat), every login profile needs
+# the NAT flags: a login, a switch or "tailscale up" over SSH can each bring
+# back the defaults. The prefs are read first, so this is quiet when nothing
+# needs changing.
+keep_nat_prefs() {
+    ts_kernel_has_nat && return 0
+    prefs=$(cli debug prefs 2> /dev/null) || return 0
+    if printf '%s' "$prefs" | grep -qE '"NetfilterMode": 0([^0-9]|$)' \
+        && printf '%s' "$prefs" | grep -qE '"NoSNAT": true'; then
+        return 0
+    fi
+    # shellcheck disable=SC2046 # two flags, split on purpose (ts_nat_flags)
+    if output=$(cli set $(ts_nat_flags) 2>&1); then
+        ts_log "no NAT in this kernel: told tailscaled to leave the firewall alone ($(ts_nat_flags))"
+    else
+        ts_log "couldn't set the NAT flags: $(one_line "$output")"
+    fi
+}
+
+# Days until this node's login (its key) expires, rounded down; nothing if
+# key expiry is off for it.
+key_days_left() {
+    expiry=$(cli status --json --peers=false 2> /dev/null \
+        | sed -n '/^  "Self": {/,/^  }/s/^    "KeyExpiry": *"\([0-9T:-]*\).*/\1/p' | head -n 1)
+    [ -n "$expiry" ] || return 1
+    expiry_epoch=$(date -u -D '%Y-%m-%dT%H:%M:%S' -d "$(echo "$expiry" | cut -c 1-19)" +%s 2> /dev/null) \
+        || return 1
+    echo $(((expiry_epoch - $(date +%s)) / 86400))
+}
+
+# WD alerts about the login. A node that needs a login but still has its
+# node key was logged out without being asked: its key expired, or it was
+# removed in the admin console. The page's Log out removes the key too, so
+# leaving on purpose raises nothing.
+check_login() {
+    case $(status_field BackendState) in
+        Running)
+            days=$(key_days_left) || return 0
+            [ "$days" -le "$TS_EXPIRY_WARN_DAYS" ] || return 0
+            when="in $days days"
+            [ "$days" = 1 ] && when="in 1 day"
+            [ "$days" -ge 1 ] || when="within a day"
+            ts_alert expiry "this NAS's login expires $when. Log in again or turn off key expiry for it in the admin console."
+            ;;
+        NeedsLogin)
+            [ "$(status_flag HaveNodeKey)" = true ] || return 0
+            ts_alert logged-out "this NAS is logged out of its tailnet. Its Configure page says how to log it back in."
+            ;;
+    esac
 }
 
 # --- the Configure page ----------------------------------------------------------
@@ -320,9 +409,11 @@ cmd_web_status() {
     fi
     should_run=false
     [ -f "$TS_SHOULD_RUN" ] && should_run=true
-    printf '{"app":{"daemon":"%s","should_run":%s,"first_start":"%s","first_start_message":"%s","switched_from":"%s"},' \
+    nat=false
+    ts_kernel_has_nat && nat=true
+    printf '{"app":{"daemon":"%s","should_run":%s,"first_start":"%s","first_start_message":"%s","switched_from":"%s","nat":%s},' \
         "$daemon" "$should_run" "$first_start" "$(json_text "$(cat "$TS_CUTOVER_FAILED" 2> /dev/null)")" \
-        "$(json_text "$(cat "$TS_SWITCHED_FROM" 2> /dev/null)")"
+        "$(json_text "$(cat "$TS_SWITCHED_FROM" 2> /dev/null)")" "$nat"
     printf '"status":%s,' "$(cli_json status --json --peers=false)"
     printf '"prefs":%s}\n' "$(cli_json debug prefs)"
 }
@@ -420,11 +511,14 @@ cmd_web_login() {
         return 1
     fi
 
+    # The new profile starts with the NAT flags (keep_nat_prefs).
+    nat_flags=$(ts_nat_flags)
     if [ -z "$auth_key" ]; then
         # The CLI waits for the login to finish, so it runs detached; the
         # login link shows up in web-status as AuthURL.
         cli_dir=$(ts_cli_dir)
-        (nohup "$cli_dir/tailscale" --socket="$TS_SOCKET" login --timeout=600s \
+        # shellcheck disable=SC2086 # two flags, split on purpose
+        (nohup "$cli_dir/tailscale" --socket="$TS_SOCKET" login $nat_flags --timeout=600s \
             >> "$TS_LOG_DIR/app.log" 2>&1 < /dev/null 9>&- &)
         ts_log "Configure page: interactive login started"
         echo ok=1
@@ -434,7 +528,8 @@ cmd_web_login() {
     # The key reaches the CLI on its stdin, read as /proc/self/fd/0 (the NAS
     # has no /dev/stdin). It's never on a command line, where other
     # processes could read it, and never in a file.
-    if output=$(printf '%s' "$auth_key" | cli login --auth-key=file:/proc/self/fd/0 --timeout=45s 2>&1); then
+    # shellcheck disable=SC2086 # two flags, split on purpose
+    if output=$(printf '%s' "$auth_key" | cli login --auth-key=file:/proc/self/fd/0 $nat_flags --timeout=45s 2>&1); then
         ts_log "Configure page: logged in with an auth key, to tailnet '$(current_tailnet)'"
         echo ok=1
         return 0
@@ -469,6 +564,7 @@ cmd_web_switch_back() {
     fi
     rm -f "$TS_SWITCHED_FROM"
     ts_log "Configure page: switched back to tailnet '$previous'"
+    keep_nat_prefs
     echo ok=1
 }
 
@@ -484,8 +580,8 @@ cmd_web_disconnect() {
 }
 
 # "tailscale up" resets every setting it isn't given, so it gets the page's
-# ones; if other settings were changed over SSH, it refuses rather than reset
-# them, and says which.
+# ones and the NAT flags; if other settings were changed over SSH, it refuses
+# rather than reset them, and says which.
 cmd_web_connect() {
     lock_or_busy || return 1
     require_daemon || return 1
@@ -502,8 +598,9 @@ cmd_web_connect() {
         echo "error=The current settings couldn't be read back; connect over SSH with \"tailscale up\"."
         return 1
     fi
+    # shellcheck disable=SC2046 # two flags, split on purpose (ts_nat_flags)
     if ! output=$(cli up --hostname="$hostname" --advertise-routes="$routes" \
-        --advertise-exit-node="$exit_node" --timeout=30s 2>&1); then
+        --advertise-exit-node="$exit_node" $(ts_nat_flags) --timeout=30s 2>&1); then
         ts_log "Configure page: tailscale up failed: $(one_line "$output")"
         echo "error=Tailscale didn't reconnect: $(one_line "$output") Over SSH, \"tailscale up\" shows the full command it needs."
         return 1
@@ -563,8 +660,9 @@ cmd_web_set() {
     lines_only_in "$wanted" "$TS_FORWARDING" > "$newly"
     ts_write_forwarding 1 "$newly"
 
+    # shellcheck disable=SC2046 # two flags, split on purpose (ts_nat_flags)
     if ! output=$(cli set --hostname="$hostname" --advertise-routes="$routes" \
-        --advertise-exit-node="$exit_node" --auto-update="$auto_update" 2>&1); then
+        --advertise-exit-node="$exit_node" --auto-update="$auto_update" $(ts_nat_flags) 2>&1); then
         ts_write_forwarding 0 "$newly"
         rm -f "$wanted" "$newly"
         ts_log "Configure page: tailscale set failed: $(one_line "$output")"

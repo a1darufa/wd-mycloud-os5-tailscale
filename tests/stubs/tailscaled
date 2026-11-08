@@ -10,6 +10,7 @@
 #   needs-login  answers as a new node that nobody has logged in yet, until
 #             the stub CLI's login creates <socket>.logged-in; with
 #             <socket>.node-key present, as a node whose login expired
+# <socket>.key-expiry, if present, is the time the node's login expires.
 #   crash     exits at once
 #   hang      never answers
 # Files the stub CLI writes next to the socket change a connected node's
@@ -51,6 +52,10 @@ write_status() { # <state> <bytes received>
     fi
     hostname=$(sed -n 's/.*"Hostname": "\([^"]*\)".*/\1/p' "$socket.prefs" 2> /dev/null)
     hostname=${hostname:-stub-nas}
+    # A login that expires: <socket>.key-expiry holds the time, as the real
+    # daemon prints it. Without it, key expiry is off for the node.
+    key_expiry=""
+    [ -f "$socket.key-expiry" ] && key_expiry="\"KeyExpiry\": \"$(cat "$socket.key-expiry")\","
     cat > "$socket.tmp" << EOF
 {
   "Version": "stub",
@@ -59,6 +64,7 @@ write_status() { # <state> <bytes received>
   "AuthURL": "$(cat "$socket.auth-url" 2> /dev/null)",
   "TailscaleIPs": [$ips],
   "Self": {
+    $key_expiry
     "HostName": "$hostname",
     "DNSName": "$hostname.tailnet.example.",
     "TailscaleIPs": [$ips]

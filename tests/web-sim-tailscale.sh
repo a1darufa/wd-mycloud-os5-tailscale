@@ -47,12 +47,13 @@ api tailscale '{"action":"save","hostname":"","routes":[],"exit_node":"yes","aut
 expect "[ '$code' = 400 ]" "a non-boolean switch is refused"
 api tailscale '{"action":"save","hostname":"nas-test","routes":["192.168.1.0/24","FD00:1::/64"],"exit_node":true,"auto_update":false}'
 expect "[ '$code' = 200 ]" "good settings are accepted"
-expect "grep -qxF -- '--hostname=nas-test --advertise-routes=192.168.1.0/24,fd00:1::/64 --advertise-exit-node=true --auto-update=false' '$SOCKET.set-args'" "tailscale set got them, routes written the standard way"
+expect "grep -qxF -- '--hostname=nas-test --advertise-routes=192.168.1.0/24,fd00:1::/64 --advertise-exit-node=true --auto-update=false --netfilter-mode=off --snat-subnet-routes=false' '$SOCKET.set-args'" "tailscale set got them, routes written the standard way, with the NAT flags (no iptables here)"
 expect "grep -qx net/ipv4/ip_forward '$TS_HOME/ip-forwarding' && grep -qx net/ipv6/conf/all/forwarding '$TS_HOME/ip-forwarding'" "forwarding noted for IPv4, and IPv6 for the IPv6 route"
 # The stub daemon rewrites its status once a second.
 wait_for "api tailscale '{\"action\":\"status\"}'; [ \"\$(field status.dns_name)\" = nas-test.tailnet.example ]" 5
 expect "[ \"\$(field status.prefs.hostname)\" = nas-test ] && [ \"\$(field status.prefs.exit_node)\" = true ] && [ \"\$(field status.prefs.auto_update)\" = false ]" "status shows the new settings"
 expect "[ \"\$(field status.prefs.routes | tr '\n' ' ')\" = '192.168.1.0/24 fd00:1::/64 ' ] && [ \"\$(field status.dns_name)\" = nas-test.tailnet.example ]" "routes without the exit node's, and the new name"
+expect "[ \"\$(field status.nat)\" = false ]" "status says the kernel has no NAT, for the page's note"
 api tailscale '{"action":"save","hostname":"","routes":[],"exit_node":false,"auto_update":true}'
 expect "[ '$code' = 200 ] && [ ! -e '$TS_HOME/ip-forwarding' ]" "clearing routes and the exit node drops the forwarding note"
 
@@ -67,7 +68,7 @@ expect "[ '$code' = 200 ]" "disconnect is accepted"
 wait_for "ts_state_is Stopped" 5
 expect "ts_state_is Stopped && [ \"\$(field status.logged_in_before)\" = true ]" "the node is offline, still logged in"
 api tailscale '{"action":"connect"}'
-expect "[ '$code' = 200 ] && grep -qxF -- '--hostname=nas-test --advertise-routes= --advertise-exit-node=false --timeout=30s' '$SOCKET.up-args'" "connect runs tailscale up with the node's own settings, so nothing is reset"
+expect "[ '$code' = 200 ] && grep -qxF -- '--hostname=nas-test --advertise-routes= --advertise-exit-node=false --netfilter-mode=off --snat-subnet-routes=false --timeout=30s' '$SOCKET.up-args'" "connect runs tailscale up with the node's own settings and the NAT flags, so nothing is reset"
 wait_for "ts_state_is Running" 5
 expect "ts_state_is Running" "and the node is back"
 api tailscale "{\"action\":\"login\",\"auth_key\":\"$bad_key\",\"switch\":true}"

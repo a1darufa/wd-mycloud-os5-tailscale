@@ -94,6 +94,9 @@
     <span class="hint">Changes apply at once, without a restart. Routes and the exit node turn on IP
       forwarding on the NAS, and off again when you remove them. An IPv6 route also turns on IPv6
       forwarding, which stops the NAS from taking its own IPv6 address from your router.</span>
+    <p id="no-nat" class="banner warn" hidden>This NAS's kernel can't translate addresses (it has no
+      NAT), so traffic forwarded for routes or the exit node keeps its tailnet address. It only works
+      if your router sends replies for 100.64.0.0/10 back to the NAS.</p>
   </form>
 
   <section id="leave" class="card caution" hidden>
@@ -132,6 +135,10 @@
       <li>Identity and settings: <code>/mnt/HD/HD_a2/.systemfile/tailscale/state</code> (kept on uninstall)</li>
       <li>Logs: <code>/mnt/HD/HD_a2/.systemfile/tailscale/log</code></li>
       <li>Command line, over SSH: <code>/mnt/HD/HD_a2/Nas_Prog/tailscale/bin/tailscale</code></li>
+      <li>Alerts: if the NAS gets logged out, its login is about to expire, or a version doesn't
+        start, the dashboard's bell icon says so, and so does e-mail if alert e-mails are set up
+        (Settings, Notifications). WD titles these "App Update Available"; the text after WD's own
+        sentence starts with "Tailscale:".</li>
     </ul>
     <p class="hint">After installing a new version, the dashboard may hang on "Updating"; refresh it.
       Tailscale keeps running throughout, and puts Run App back the way it was. If the dashboard still

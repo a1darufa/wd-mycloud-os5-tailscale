@@ -86,6 +86,8 @@ function tailscale_status(): array
         'first_start_message' => ts_text($app['first_start_message'] ?? null),
         // The tailnet the last switch left, which the page can return to.
         'switched_from' => ts_text($app['switched_from'] ?? null),
+        // Whether the kernel can NAT forwarded traffic (routes, exit node).
+        'nat' => ($app['nat'] ?? true) !== false,
         'backend_state' => ts_text($status['BackendState'] ?? null),
         // A node that needs a login but has a node key was logged in before;
         // ctl.sh only logs in nodes that never were.

@@ -81,6 +81,30 @@ else
     failed+=("javascript syntax")
 fi
 
+echo "== app descriptions"
+# The dashboard shows only the tag of its own language, with no fallback
+# (get_app_desc in WD's /var/www/web/function/app_menu.js), so each app's
+# desc.xml needs a text for every one of its languages.
+dashboard_languages="en-US fr-FR it-IT de-DE es-ES zh-CN zh-TW ko-KR ja-JP ru-RU pt-BR cs-CZ nl-NL hu-HU no-NO pl-PL sv-SE tr-TR"
+for app in tailscale transmission4; do
+    desc=$app/package/web/desc.xml
+    [[ -f $desc ]] || continue
+    missing=()
+    for language in $dashboard_languages; do
+        grep -qE "<$language>[^<]+</$language>" "$desc" || missing+=("$language")
+    done
+    if ! docker run --rm -v "$repo_dir:/work:ro" -w /work wd-os5-web-test \
+        php -r 'exit(simplexml_load_file($argv[1]) === false ? 1 : 0);' "$desc" > /dev/null 2>&1; then
+        echo "$desc: not well-formed XML"
+        failed+=("$app description")
+    elif [[ ${#missing[@]} -gt 0 ]]; then
+        echo "$desc: no text for ${missing[*]}"
+        failed+=("$app description")
+    else
+        echo "$desc: all $(wc -w <<< "$dashboard_languages") dashboard languages"
+    fi
+done
+
 echo "== shellcheck"
 mapfile -t scripts < <(repo_files '\.sh$|^tests/stubs/')
 if docker run --rm -v "$repo_dir:/mnt:ro" -w /mnt koalaman/shellcheck:stable -x -P SCRIPTDIR "${scripts[@]}"; then
